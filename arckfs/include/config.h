@@ -1,6 +1,12 @@
 #ifndef SUFS_GLOBAL_CONFIG_H_
 #define SUFS_GLOBAL_CONFIG_H_
 
+#define FIX_CS_COUNTER 0
+#define FIX_DRAM_PM_SYNC 0
+#define FIX_RENAME 0
+
+#define STRESS_DRAM_PM_SYNC 0
+
 /* cache line size */
 #define SUFS_CACHELINE 64
 
@@ -43,7 +49,11 @@
 #define SUFS_FIRST_UFS_INODE_NUM (3)
 
 /* Maximal number of inode */
-#define SUFS_MAX_INODE_NUM    16777216
+#if FIX_CS_COUNTER
+#define SUFS_MAX_INODE_NUM    16777216 / 4
+#else
+#define SUFS_MAX_INODE_NUM    16777216 / 4
+#endif
 
 #define SUFS_SUPER_PAGE_SIZE  4096
 
@@ -56,7 +66,12 @@
 /* Lease ring: whether an inode is in critical section or not */
 #define SUFS_LEASE_RING_ADDR (SUFS_RING_ADDR)
 
-#define SUFS_LEASE_RING_SIZE (SUFS_MAX_INODE_NUM / 8)
+#if FIX_CS_COUNTER
+    // Fix: Allocate 1-byte counter for each inode
+    #define SUFS_LEASE_RING_SIZE (SUFS_MAX_INODE_NUM * 1)
+#else
+    #define SUFS_LEASE_RING_SIZE (SUFS_MAX_INODE_NUM / 8)
+#endif
 
 /* Mapped ring: whether an inode is still being mapped or not */
 #define SUFS_MAPPED_RING_ADDR (SUFS_RING_ADDR + SUFS_LEASE_RING_SIZE)

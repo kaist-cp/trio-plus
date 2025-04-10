@@ -10,6 +10,10 @@
 #include "super.h"
 #include "inode.h"
 
+#if FIX_CS_COUNTER
+#include <stdatomic.h>
+#endif
+
 /*
  * Just need something simple here to make the prototype work, the release is
  * not the interesting part of the paper and it is unlikely to become the
@@ -49,8 +53,12 @@ static inline int sufs_kfs_is_lease_expired(int ino, struct sufs_kfs_lease *l,
 
     lease_ring_addr = sufs_tgroup[l->owner[index]].lease_ring_kaddr;
 
+#if FIX_CS_COUNTER
+    // Fix: Check there is no threads in critical section now. 
+    return !(atomic_load(((atomic_uchar*) lease_ring_addr) + ino));
+#else
     return !(test_bit(ino, lease_ring_addr));
-
+#endif
 }
 
 /* Invoke when the lock is acquired

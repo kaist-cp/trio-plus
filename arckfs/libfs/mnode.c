@@ -58,6 +58,13 @@ static struct sufs_libfs_mnode* sufs_libfs_mfs_do_mnode_init(u8 type,
 
     sufs_libfs_inode_rwlock_init(m);
 
+#if FIX_DRAM_PM_SYNC
+    pthread_rwlockattr_t attr;
+    pthread_rwlockattr_init(&attr);
+    pthread_rwlockattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_rwlock_init(&m->sync_lock, &attr);    
+#endif
+
     switch (type)
     {
         case SUFS_FILE_TYPE_REG:
@@ -244,8 +251,17 @@ sufs_libfs_mnode_dir_lookup(struct sufs_libfs_mnode *mnode, char *name)
         goto out;
     }
 
+#if FIX_DRAM_PM_SYNC
+    // Fix: We need to ensure that chainhash_lookup result is also persisted in PM
+    pthread_rwlock_rdlock(&mnode->sync_lock);
+#endif
+    // DRAM read
     sufs_libfs_chainhash_lookup(&mnode->data.dir_data.map_, name, SUFS_NAME_MAX,
             &ino, NULL);
+
+#if FIX_DRAM_PM_SYNC
+    pthread_rwlock_unlock(&mnode->sync_lock);
+#endif
 
 #if 0
         printf("name is %s, ino is %ld!\n", name, ino);
@@ -280,8 +296,17 @@ bool sufs_libfs_mnode_dir_enumerate(struct sufs_libfs_mnode *mnode, char *prev,
     if (sufs_libfs_map_file(mnode, 0) != 0)
         goto out;
 
+#if FIX_DRAM_PM_SYNC
+    // Fix: We need to ensure that chainhash_lookup result is also persisted in PM
+    pthread_rwlock_rdlock(&mnode->sync_lock);
+#endif
+    // DRAM read
     ret = sufs_libfs_chainhash_enumerate(&mnode->data.dir_data.map_,
             SUFS_NAME_MAX, prev, name);
+
+#if FIX_DRAM_PM_SYNC
+    pthread_rwlock_unlock(&mnode->sync_lock);
+#endif
 
 out:
     sufs_libfs_file_exit_cs(mnode);
@@ -298,8 +323,17 @@ __ssize_t sufs_libfs_mnode_dir_getdents(struct sufs_libfs_mnode *mnode,
     if (sufs_libfs_map_file(mnode, 0) != 0)
         goto out;
 
+#if FIX_DRAM_PM_SYNC
+    // Fix: We need to ensure that chainhash_lookup result is also persisted in PM
+    pthread_rwlock_rdlock(&mnode->sync_lock);
+#endif
+    // DRAM read
     ret = sufs_libfs_chainhash_getdents(&mnode->data.dir_data.map_,
             SUFS_NAME_MAX, offset_ptr, buffer, length);
+
+#if FIX_DRAM_PM_SYNC
+    pthread_rwlock_unlock(&mnode->sync_lock);
+#endif
 
 out:
     sufs_libfs_file_exit_cs(mnode);
@@ -418,6 +452,12 @@ bool sufs_libfs_mnode_dir_insert(struct sufs_libfs_mnode *mnode, char *name,
         goto out;
     }
 
+#if FIX_DRAM_PM_SYNC
+    // Fix: We need to perform DRAM write and PM write atomically
+    pthread_rwlock_wrlock(&mnode->sync_lock);
+#endif
+
+    // DRAM write
     if (!sufs_libfs_chainhash_insert(&mnode->data.dir_data.map_, name,
             SUFS_NAME_MAX, mf->ino_num, 0, &item))
     {
@@ -428,6 +468,11 @@ bool sufs_libfs_mnode_dir_insert(struct sufs_libfs_mnode *mnode, char *name,
         goto out;
     }
 
+#if STRESS_DRAM_PM_SYNC
+    sleep(5);
+#endif
+
+    // PM write
     if (!sufs_libfs_mnode_dir_entry_insert(mnode, name, name_len, mf, &dir))
     {
 #if 0
@@ -437,7 +482,12 @@ bool sufs_libfs_mnode_dir_insert(struct sufs_libfs_mnode *mnode, char *name,
         goto out;
     }
 
+    // DRAM write
     item->val2 = (unsigned long) dir;
+
+#if FIX_DRAM_PM_SYNC
+    pthread_rwlock_unlock(&mnode->sync_lock);
+#endif
     ret = true;
 
 #if 0
@@ -467,16 +517,26 @@ bool sufs_libfs_mnode_dir_remove(struct sufs_libfs_mnode *mnode, char *name)
     if (sufs_libfs_map_file(mnode, 1) != 0)
         goto out;
 
+#if FIX_DRAM_PM_SYNC
+    // Fix: We need to perform DRAM write and PM write atomically
+    pthread_rwlock_wrlock(&mnode->sync_lock);
+#endif
+    // DRAM write
     if (!sufs_libfs_chainhash_remove(&mnode->data.dir_data.map_, name,
             SUFS_NAME_MAX, NULL, (unsigned long*) &dir))
     {
         goto out;
     }
 
+    // PM write
     dir->ino_num = SUFS_INODE_TOMBSTONE;
 
     sufs_libfs_clwb_buffer(&(dir->ino_num), sizeof(dir->ino_num));
     sufs_libfs_sfence();
+
+#if FIX_DRAM_PM_SYNC
+    pthread_rwlock_unlock(&mnode->sync_lock);
+#endif
 
     ret = true;
 
@@ -493,6 +553,8 @@ bool sufs_libfs_mnode_dir_kill(struct sufs_libfs_mnode *mnode)
     if (sufs_libfs_map_file(mnode, 0) != 0)
         goto out;
 
+    // Fix: Maybe we need to acquire write lock of mnode->sync_lock
+    // DRAM write
     ret = sufs_libfs_chainhash_remove_and_kill(&mnode->data.dir_data.map_);
 out:
     sufs_libfs_file_exit_cs(mnode);
@@ -520,8 +582,18 @@ sufs_libfs_mnode_dir_exists(struct sufs_libfs_mnode *mnode, char *name)
         goto out;
     }
 
+#if FIX_DRAM_PM_SYNC
+    // Fix: We need to ensure that chainhash_lookup result is also persisted in PM
+    pthread_rwlock_rdlock(&mnode->sync_lock);
+#endif
+    // DRAM read
     sufs_libfs_chainhash_lookup(&mnode->data.dir_data.map_, name, SUFS_NAME_MAX,
             &ret, NULL);
+
+#if FIX_DRAM_PM_SYNC
+    pthread_rwlock_unlock(&mnode->sync_lock);
+#endif
+
 out:
     sufs_libfs_file_exit_cs(mnode);
     return sufs_libfs_mnode_array[ret];

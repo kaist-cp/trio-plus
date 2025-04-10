@@ -39,11 +39,19 @@ static inline struct sufs_libfs_mnode* sufs_libfs_nameiparent(
 static inline void sufs_libfs_file_enter_cs(struct sufs_libfs_mnode *m)
 {
     /* sufs_libfs_bm_set_bit((char*) SUFS_LEASE_RING_ADDR, m->ino_num); */
+#if FIX_CS_COUNTER
+    // Fix: Change bitmap to array of counters
+    atomic_fetch_add(((atomic_uchar*)SUFS_LEASE_RING_ADDR) + m->ino_num, 1);
+#endif
 }
 
 static inline void sufs_libfs_file_exit_cs(struct sufs_libfs_mnode *m)
 {
     /* sufs_libfs_bm_clear_bit((char*) SUFS_LEASE_RING_ADDR, m->ino_num); */
+#if FIX_CS_COUNTER
+    // Fix: Change bitmap to array of counters
+    atomic_fetch_sub(((atomic_uchar*)SUFS_LEASE_RING_ADDR) + m->ino_num, 1);
+#endif
 }
 
 static inline int sufs_libfs_file_is_mapped(struct sufs_libfs_mnode *m)

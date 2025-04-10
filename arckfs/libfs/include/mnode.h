@@ -47,6 +47,10 @@ struct sufs_libfs_mnode
     struct sufs_fidx_entry * index_start;
     struct sufs_fidx_entry * index_end;
 
+#if FIX_DRAM_PM_SYNC
+    pthread_rwlock_t sync_lock;
+#endif
+
     /*
         atomic_long nlink_ __mpalign__;
         __padout__;
