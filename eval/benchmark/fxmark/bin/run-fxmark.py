@@ -427,7 +427,12 @@ class Runner(object):
         print(log)
 
     def get_ncores(self, hint):
-        ncores = [(48,1)]
+        ncores = []
+        for i in range(1, 25):
+            ncores.append((i, 1))
+        for i in range(25, 49):
+            ncores.append((i, 2))
+        return ncores
         #for i in range(12):
         #    ncores.append((4*(i+1), 1))
         return ncores

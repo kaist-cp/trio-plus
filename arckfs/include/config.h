@@ -3,9 +3,9 @@
 
 // After modifying the configuration, run ./compile.sh in /trio-sosp23-ae/arckfs to apply the changes.
 
-#define FIX_CS_COUNTER 0
-#define FIX_DRAM_PM_SYNC 0
-#define FIX_RENAME 0
+#define FIX_CS_COUNTER 1
+#define FIX_DRAM_PM_SYNC 1
+#define FIX_RENAME 1
 
 #define STRESS_DRAM_PM_SYNC 0
 
