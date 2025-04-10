@@ -188,3 +188,12 @@ int sufs_libfs_cmd_chmod(int inode, unsigned int mode,
     return syscall(SYS_ioctl, dev_fd, SUFS_CMD_CHMOD, &entry);
 }
 
+#if FIX_RENAME
+int sufs_libfs_cmd_rename_lock(void) {
+    return syscall(SYS_ioctl, dev_fd, SUFS_CMD_RENAME_LOCK, NULL);
+}
+
+int sufs_libfs_cmd_rename_unlock(void) {
+    return syscall(SYS_ioctl, dev_fd, SUFS_CMD_RENAME_UNLOCK, NULL);
+}
+#endif

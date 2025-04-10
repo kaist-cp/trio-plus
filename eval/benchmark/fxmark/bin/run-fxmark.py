@@ -427,6 +427,10 @@ class Runner(object):
         print(log)
 
     def get_ncores(self, hint):
+        ncores = [(48,1)]
+        #for i in range(12):
+        #    ncores.append((4*(i+1), 1))
+        return ncores
         # if user specifies the specific number of cores he/she wants to run,
         # stop auto generate the core numbers
         if hint.isdigit():
@@ -523,7 +527,7 @@ class Runner(object):
         else:
             sys.exit("Unknown mode in init_pm")
 
-        for i in range(num):
+        for i in range(num*2, 2):
             path = ptemp % (i)
 
             if (os.path.exists(path) == False):

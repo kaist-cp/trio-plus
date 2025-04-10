@@ -266,7 +266,10 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
     }
 
 #if FIX_RENAME
-    // TODO: Acquire file-system wide rename lock if it's cross-directory rename
+    // Fix: Acquire global rename lock if it is cross-directory rename
+    if(mdold->ino_num != mdnew->ino_num)
+        sufs_libfs_cmd_rename_lock();
+    
     // Fix: Uncomment necessary loop avoidance check
     if (mdold != mdnew && mfold_type == SUFS_FILE_TYPE_DIR)
     {
@@ -370,6 +373,9 @@ out:
 #if FIX_DRAM_PM_SYNC
     pthread_rwlock_unlock(&mdnew->sync_lock);
     if (mdnew->ino_num != mdold->ino_num) pthread_rwlock_unlock(&mdold->sync_lock);
+#endif
+#if FIX_RENAME
+    if (mdnew->ino_num != mdold->ino_num) sufs_libfs_cmd_rename_unlock();
 #endif
     sufs_libfs_file_exit_cs(mdnew);
 

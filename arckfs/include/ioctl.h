@@ -18,6 +18,11 @@
 #define SUFS_CMD_CHOWN            0x1009
 #define SUFS_CMD_CHMOD            0x100a
 
+#if FIX_RENAME
+#define SUFS_CMD_RENAME_LOCK    0x100b
+#define SUFS_CMD_RENAME_UNLOCK  0x100c
+#endif
+
 /* For debugging */
 #define SUFS_CMD_DEBUG_READ    0x2000
 #define SUFS_CMD_DEBUG_INIT    0x2001

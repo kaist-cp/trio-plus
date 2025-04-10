@@ -1,6 +1,8 @@
 #ifndef SUFS_GLOBAL_CONFIG_H_
 #define SUFS_GLOBAL_CONFIG_H_
 
+// After modifying the configuration, run ./compile.sh in /trio-sosp23-ae/arckfs to apply the changes.
+
 #define FIX_CS_COUNTER 0
 #define FIX_DRAM_PM_SYNC 0
 #define FIX_RENAME 0

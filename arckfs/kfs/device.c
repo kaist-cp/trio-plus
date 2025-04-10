@@ -12,6 +12,24 @@
 #include "inode.h"
 #include "balloc.h"
 
+#if FIX_RENAME
+#include <linux/spinlock.h>
+// Fix: Introduce global rename lock
+spinlock_t sufs_rename_lock;
+
+static void sufs_kfs_rename_lock_init(void) {
+    spin_lock_init(&sufs_rename_lock);
+}
+
+static void sufs_kfs_rename_lock(void) {
+    spin_lock(&sufs_rename_lock);
+}
+
+static void sufs_kfs_rename_unlock(void) {
+    spin_unlock(&sufs_rename_lock);
+}
+#endif
+
 /*
  * How many pm devices supremefs kernel module is responsible for? */
 /* 1: /dev/dax0.0,
@@ -67,6 +85,15 @@ static long sufs_kfs_ioctl(struct file *file, unsigned int cmd,
 
         case SUFS_CMD_DEBUG_INIT:
             return sufs_kfs_do_init();
+#if FIX_RENAME
+        case SUFS_CMD_RENAME_LOCK:
+            sufs_kfs_rename_lock();
+            return 0;
+
+        case SUFS_CMD_RENAME_UNLOCK:
+            sufs_kfs_rename_unlock();
+            return 0;
+#endif
 
         default:
             printk("%s: unsupported command %x\n", __func__, cmd);
@@ -153,6 +180,10 @@ static int sufs_init(void)
         ret = PTR_ERR(dev);
         goto out_class;
     }
+
+#if FIX_RENAME
+    sufs_kfs_rename_lock_init();
+#endif
 
     printk("sufs init done!\n");
 
