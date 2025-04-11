@@ -532,7 +532,7 @@ class Runner(object):
         else:
             sys.exit("Unknown mode in init_pm")
 
-        for i in range(num*2, 2):
+        for i in range(0, num*2, 2):
             path = ptemp % (i)
 
             if (os.path.exists(path) == False):
