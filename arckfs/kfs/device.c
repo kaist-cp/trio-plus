@@ -181,7 +181,14 @@ static int sufs_init(void)
         goto out_class;
     }
 
+#if FIX_CS_COUNTER
+    printk("%s: FIX_CS_COUNTER enabled\n", __func__);
+#endif
+#if FIX_DRAM_PM_SYNC
+    printk("%s: FIX_DRAM_PM_SYNC enabled\n", __func__);
+#endif
 #if FIX_RENAME
+    printk("%s: FIX_RENAME enabled\n", __func__);
     sufs_kfs_rename_lock_init();
 #endif
 
