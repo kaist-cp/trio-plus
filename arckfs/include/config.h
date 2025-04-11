@@ -69,6 +69,7 @@
 #define SUFS_LEASE_RING_ADDR (SUFS_RING_ADDR)
 
 #if FIX_CS_COUNTER
+    #define CS_COUNTER_SENTINEL 255
     // Fix: Allocate 1-byte counter for each inode
     #define SUFS_LEASE_RING_SIZE (SUFS_MAX_INODE_NUM * 1)
 #else

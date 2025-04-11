@@ -40,8 +40,17 @@ static inline void sufs_libfs_file_enter_cs(struct sufs_libfs_mnode *m)
 {
     /* sufs_libfs_bm_set_bit((char*) SUFS_LEASE_RING_ADDR, m->ino_num); */
 #if FIX_CS_COUNTER
-    // Fix: Change bitmap to array of counters
-    atomic_fetch_add(((atomic_uchar*)SUFS_LEASE_RING_ADDR) + m->ino_num, 1);
+    // Fix: Change bitmap to array of atomic counters
+    atomic_uchar* addr = ((atomic_uchar*)SUFS_LEASE_RING_ADDR) + m->ino_num;
+    unsigned char count, new_count;
+    do {
+        count = atomic_load(addr);
+        // Fix: Do not enter the critical section if the kernel could revoke the lease for this inode.
+        if (count == CS_COUNTER_SENTINEL) {
+            count = 0;
+        }
+        new_count = count + 1;
+    } while (!atomic_compare_exchange_weak(addr, &count, new_count));
 #endif
 }
 
@@ -49,8 +58,13 @@ static inline void sufs_libfs_file_exit_cs(struct sufs_libfs_mnode *m)
 {
     /* sufs_libfs_bm_clear_bit((char*) SUFS_LEASE_RING_ADDR, m->ino_num); */
 #if FIX_CS_COUNTER
-    // Fix: Change bitmap to array of counters
-    atomic_fetch_sub(((atomic_uchar*)SUFS_LEASE_RING_ADDR) + m->ino_num, 1);
+    // Fix: Change bitmap to array of atomic counters
+    atomic_uchar* addr = ((atomic_uchar*)SUFS_LEASE_RING_ADDR) + m->ino_num;
+    unsigned char count, new_count;
+    do {
+        count = atomic_load(addr);
+        new_count = count - 1;
+    } while (!atomic_compare_exchange_weak(addr, &count, new_count));
 #endif
 }
 
