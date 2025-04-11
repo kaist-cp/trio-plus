@@ -2,10 +2,19 @@
 #define SUFS_GLOBAL_CONFIG_H_
 
 // After modifying the configuration, run ./compile.sh in /trio-sosp23-ae/arckfs to apply the changes.
+#include "fix_config.h"
 
+#ifndef FIX_CS_COUNTER
 #define FIX_CS_COUNTER 0
+#endif
+
+#ifndef FIX_DRAM_PM_SYNC
 #define FIX_DRAM_PM_SYNC 0
+#endif
+
+#ifndef FIX_RENAME
 #define FIX_RENAME 0
+#endif
 
 #define STRESS_DRAM_PM_SYNC 0
 
