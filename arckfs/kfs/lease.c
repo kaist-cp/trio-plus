@@ -57,7 +57,7 @@ static inline int sufs_kfs_is_lease_expired(int ino, struct sufs_kfs_lease *l,
     // Fix: Ensure there are no threads currently in the critical section.
     //      If the kernel observes that the counter is zero, it may begin revoking the lease from the owner.
     //      We must prevent new threads from entering cs by atomically setting the sentinel value.
-    atomic_uchar* addr = ((atomic_uchar*) lease_ring_addr) + ino;
+    atomic_char* addr = ((atomic_char*) lease_ring_addr) + ino;
     unsigned char count = 0;
     return atomic_compare_exchange_strong(addr, &count, CS_COUNTER_SENTINEL);
 #else
@@ -241,7 +241,7 @@ int sufs_kfs_acquire_write_lease(int ino, struct sufs_kfs_lease *l, int tgid)
         //      previous owners are free to enter critical sections.
         for (int i = 0; i < l->owner_cnt; i++)
         {
-            atomic_uchar* addr = ((atomic_uchar*)sufs_tgroup[l->owner[i]].lease_ring_kaddr) + ino;
+            atomic_char* addr = ((atomic_char*)sufs_tgroup[l->owner[i]].lease_ring_kaddr) + ino;
             if (atomic_load(addr) == CS_COUNTER_SENTINEL)
                 atomic_store(addr, 0);
         }
@@ -382,7 +382,7 @@ int sufs_kfs_acquire_read_lease(int ino, struct sufs_kfs_lease *l, int tgid)
         //      previous owners are free to enter critical sections.
         for (int i = 0; i < l->owner_cnt; i++)
         {
-            atomic_uchar* addr = ((atomic_uchar*)sufs_tgroup[l->owner[i]].lease_ring_kaddr) + ino;
+            atomic_char* addr = ((atomic_char*)sufs_tgroup[l->owner[i]].lease_ring_kaddr) + ino;
             if (atomic_load(addr) == CS_COUNTER_SENTINEL)
                 atomic_store(addr, 0);
         }
