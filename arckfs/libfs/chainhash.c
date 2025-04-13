@@ -95,8 +95,9 @@ void sufs_libfs_chainhash_init(struct sufs_libfs_chainhash *hash, int index)
 
     hash->dead_ = false;
     hash->size = 0;
-
+#if !FIX_DRAM_PM_SYNC
     sufs_libfs_seq_lock_init(&(hash->seq_lock));
+#endif
 
     for (i = 0; i < hash->nbuckets_; i++)
     {
@@ -130,6 +131,11 @@ sufs_libfs_chainhash_find_resize_buckets(struct sufs_libfs_chainhash *hash,
 static struct sufs_libfs_ch_bucket *
 sufs_libfs_get_buckets(struct sufs_libfs_chainhash * hash, char * key, int max_size)
 {
+#if FIX_DRAM_PM_SYNC
+    // Fix: There is no concurrent resizing, so we don't need seqlock retry loop.
+    struct sufs_libfs_ch_bucket * buckets = hash->buckets_;
+    u64 nbuckets = hash->nbuckets_;
+#else
     int bseq = 0, eseq = 0;
     struct sufs_libfs_ch_bucket * buckets = NULL;
     u64 nbuckets = 0;
@@ -144,7 +150,7 @@ sufs_libfs_get_buckets(struct sufs_libfs_chainhash * hash, char * key, int max_s
         eseq = sufs_libfs_seq_lock_read(&(hash->seq_lock));
 
     } while (sufs_libfs_seq_lock_retry(bseq, eseq));
-
+#endif
     return (&(buckets[sufs_libfs_hash_string(key, max_size) % nbuckets]));
 }
 
@@ -316,13 +322,14 @@ static void sufs_libfs_chainhash_resize(struct sufs_libfs_chainhash * hash,
     }
 
     /* swap back */
+#if !FIX_DRAM_PM_SYNC
     sufs_libfs_seq_lock_write_begin(&hash->seq_lock);
-
+#endif
     hash->buckets_ = hash->buckets_resize_;
     hash->nbuckets_ = hash->nbuckets_resize_;
-
+#if !FIX_DRAM_PM_SYNC
     sufs_libfs_seq_lock_write_end(&hash->seq_lock);
-
+#endif
     hash->buckets_resize_ = NULL;
 
     /*

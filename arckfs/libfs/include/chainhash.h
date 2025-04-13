@@ -23,7 +23,7 @@ struct sufs_libfs_ch_item
 struct sufs_libfs_ch_bucket
 {
 #if !FIX_DRAM_PM_SYNC
-        // Fix: if we fix dram/pm synchronization, bucket lock is no longer needed.
+        // Fix: If we fix DRAM/PM synchronization, bucket lock is no longer needed.
         pthread_spinlock_t lock __mpalign__;
 #endif
         bool dead_;
@@ -42,8 +42,11 @@ struct sufs_libfs_chainhash
         struct sufs_libfs_ch_bucket * buckets_resize_;
 
         atomic_long size;
-        // TODO: Can we remove seq_lock too?
+#if !FIX_DRAM_PM_SYNC
+        // Fix: Once we fix DRAM/PM synchronization, there will be no concurrent writers.
+        //       Therefore, we don't need to handle concurrent resizing.
         atomic_int  seq_lock;
+#endif
         bool dead_;
 };
 
