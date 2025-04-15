@@ -17,6 +17,7 @@
 #endif
 
 #define STRESS_DRAM_PM_SYNC 0
+#define STRESS_HASH 0
 
 /* cache line size */
 #define SUFS_CACHELINE 64

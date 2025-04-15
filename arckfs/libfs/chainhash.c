@@ -62,6 +62,12 @@ static inline void sufs_libfs_ch_item_free(struct sufs_libfs_ch_item *item)
 
     if (item)
         free(item);
+
+#if STRESS_HASH
+    void* dummy = malloc(sizeof(struct sufs_libfs_ch_item));
+    memset(dummy, -1, sizeof(struct sufs_libfs_ch_item));
+    printf("[STRESS] %lx reallocated and filled with -1\n", dummy);
+#endif
 }
 
 static inline void
@@ -182,6 +188,13 @@ bool sufs_libfs_chainhash_lookup(struct sufs_libfs_chainhash *hash, char *key,
 
     for (i = b->head; i != NULL; i = i->next)
     {
+#if STRESS_HASH
+        sleep(3);
+        int cpu;
+        getcpu(&cpu, NULL);
+        printf("%d: try to read %lx\n", cpu, i);
+        printf("%d: i->key: %lx\n", cpu, i->key);
+#endif
         if (strcmp(i->key, key) != 0)
             continue;
 
