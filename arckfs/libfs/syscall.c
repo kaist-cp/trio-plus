@@ -458,7 +458,8 @@ static struct sufs_libfs_mnode* sufs_libfs_create(struct sufs_libfs_mnode *cwd,
         sufs_libfs_clwb_buffer(dir, sizeof(struct sufs_dir_entry) + name_len);
         sufs_libfs_sfence();
 
-        sufs_libfs_clwb_buffer(&(dir->inode), sizeof(int));
+        dir->ino_num = inode;
+        sufs_libfs_clwb_buffer(&(dir->ino_num), sizeof(dir->ino_num));
         sufs_libfs_sfence();
 
         return mf;
