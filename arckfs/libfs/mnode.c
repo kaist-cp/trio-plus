@@ -202,10 +202,17 @@ sufs_libfs_mnode_dir_build_index_one_file_block(struct sufs_libfs_mnode * mnode,
                     mnode->ino_num, &dir->inode) == NULL)
                 return -ENOMEM;
 
+            struct sufs_libfs_ch_bucket *b = NULL;
+            b = sufs_libfs_get_buckets(&mnode->data.dir_data.map_, dir->name, SUFS_NAME_MAX);
+            pthread_spin_lock(&b->lock);
+
             if (sufs_libfs_chainhash_insert(&mnode->data.dir_data.map_,
                     dir->name, SUFS_NAME_MAX, dir->ino_num,
-                    (unsigned long) dir, NULL) == false)
-                return -ENOMEM;
+                    (unsigned long) dir, NULL) == false) {
+                    pthread_spin_unlock(&b->lock);
+                    return -ENOMEM;
+                }
+            pthread_spin_unlock(&b->lock);
         }
 
         dir = (struct sufs_dir_entry *)
@@ -496,7 +503,11 @@ bool sufs_libfs_mnode_dir_insert(struct sufs_libfs_mnode *mnode, char *name,
 #if FIX_DRAM_PM_SYNC
     // Fix: We need to perform DRAM write and PM write atomically
     // pthread_rwlock_wrlock(&mnode->sync_lock);
-    mnode_wrlock(mnode, name);
+    
+    // mnode_wrlock(mnode, name);
+    struct sufs_libfs_ch_bucket *b = NULL;
+    b = sufs_libfs_get_buckets(&mnode->data.dir_data.map_, name, SUFS_NAME_MAX);
+    pthread_spin_lock(&b->lock);
 #endif
 
     // DRAM write
@@ -528,7 +539,8 @@ bool sufs_libfs_mnode_dir_insert(struct sufs_libfs_mnode *mnode, char *name,
     item->val2 = (unsigned long) dir;
 
 #if FIX_DRAM_PM_SYNC
-    mnode_unlock(mnode, name); //pthread_rwlock_unlock(&mnode->sync_lock);
+    // mnode_unlock(mnode, name); //pthread_rwlock_unlock(&mnode->sync_lock);
+    pthread_spin_unlock(&b->lock);
 #endif
     ret = true;
 
