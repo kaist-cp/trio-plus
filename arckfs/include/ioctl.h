@@ -19,6 +19,7 @@
 #define SUFS_CMD_CHMOD            0x100a
 
 #if FIX_RENAME
+// Fix: Add new IOCTL commands to support a global rename lock
 #define SUFS_CMD_RENAME_LOCK    0x100b
 #define SUFS_CMD_RENAME_UNLOCK  0x100c
 #endif

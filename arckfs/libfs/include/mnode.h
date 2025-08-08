@@ -53,6 +53,12 @@ struct sufs_libfs_mnode
     struct sufs_fidx_entry * index_end;
 
 #if FIX_RENAME
+    // Fix: Use an inode-grained lock to ensure correct rename behavior,
+    //      following the cross-directory locking rules in Linux:
+    //      https://docs.kernel.org/filesystems/directory-locking.html
+    //
+    //      This could potentially be made more fine-grained, but the
+    //      performance impact is negligible since rename operations are rare.
     pthread_rwlock_t sync_lock;
 
     // struct padded_rwlock* hash_lock; //[HASH_LOCK_SIZE] __attribute__((aligned(64)));

@@ -57,10 +57,31 @@ static inline int sufs_kfs_is_lease_expired(int ino, struct sufs_kfs_lease *l,
     // Fix: Ensure there are no threads currently in the critical section.
     //      If the kernel observes that the counter is zero, it may begin revoking the lease from the owner.
     //      We must prevent new threads from entering cs by atomically setting the sentinel value.
+    //      
+    //      Note: The sentinel value is not an enforcement mechanism;
+    //      it is merely a notification to LibFS.
+    //      If a malicious or buggy LibFS violates the rule and modifies a sentinel-valued counter,
+    //      it may trigger unexpected unmapping and expose itself to potential segmentation faults.
+    //      This is a consequence entirely on the LibFS side and does not pose any security issue.
     atomic_char* addr = ((atomic_char*) lease_ring_addr) + ino;
     unsigned char count = 0;
     return atomic_compare_exchange_strong(addr, &count, CS_COUNTER_SENTINEL);
 #else
+    /*
+    * Original design:
+    * To check lease expiration, the kernel reads information from the lease
+    * ring, which is maintained by LibFS. This design inherently requires even
+    * potentially malicious LibFS instances to cooperate — e.g., setting the
+    * bit to 0 when the LibFS finishes using the inode.
+    *
+    * Our patch preserves this original design philosophy:
+    *   (1) Usage information is still managed in real time by LibFS via the
+    *       lease ring.
+    *   (2) The kernel controller checks for expiration based on the usage
+    *       data indicated by LibFS.
+    *   (3) Since LibFS cannot be fully trusted, we rely on
+    *       mechanisms such as timeouts.
+    */
     return !(test_bit(ino, lease_ring_addr));
 #endif
 }

@@ -401,6 +401,7 @@ bool sufs_libfs_mnode_dir_entry_insert(struct sufs_libfs_mnode *mnode,
 #endif
 
     strcpy(dir->name, name);
+    // Fix: Initially set `dir->ino_num` to 0 so it can serve as a commit point.
     dir->ino_num = 0;
     dir->rec_len = record_len;
 

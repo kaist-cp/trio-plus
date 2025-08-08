@@ -347,6 +347,15 @@ static void sufs_libfs_chainhash_resize(struct sufs_libfs_chainhash * hash,
 }
 
 #if FIX_DRAM_PM_SYNC
+/*
+ * Given a hash table and a key, locate the corresponding bucket,
+ * acquire its write lock, and return it.
+ *
+ * The returned bucket pointer `b` acts as a descriptor: mutual exclusion
+ * on that bucket is guaranteed until `sufs_libfs_bucket_unlock(hash, b, ...)` is called.
+ * 
+ * This function preserves the original behavior of chainhash functions.
+ */
 struct sufs_libfs_ch_bucket* sufs_libfs_bucket_write_lock(struct sufs_libfs_chainhash *hash,
     char *key, int max_size)
 {
@@ -370,6 +379,15 @@ struct sufs_libfs_ch_bucket* sufs_libfs_bucket_write_lock(struct sufs_libfs_chai
     return b;
 }
 
+/*
+ * Release the lock on the given bucket `b`, previously acquired via
+ * `sufs_libfs_bucket_write_lock()`.
+ *
+ * If `resize` is true, check the load factor and, if necessary,
+ * resize the hash table after unlocking.
+ * 
+ * This function preserves the original behavior of chainhash functions.
+ */
 void sufs_libfs_bucket_unlock(struct sufs_libfs_chainhash *hash, struct sufs_libfs_ch_bucket* b, int max_size, bool resize)
 {
     //pthread_spin_unlock(&b->lock);
@@ -382,8 +400,10 @@ void sufs_libfs_bucket_unlock(struct sufs_libfs_chainhash *hash, struct sufs_lib
     }
 }
 
-// Bucket version of insert
-// Write lock required
+// Bucket version of insert.
+//
+// Insert a hash table entry into the given bucket `b`, previously acquired via
+// `sufs_libfs_bucket_write_lock()`.
 bool sufs_libfs_bucket_insert(struct sufs_libfs_chainhash *hash, struct sufs_libfs_ch_bucket* b, char *key,
     int max_size, unsigned long val, unsigned long val2,
     struct sufs_libfs_ch_item ** item) 
@@ -541,6 +561,10 @@ out:
 }
 
 #if FIX_DRAM_PM_SYNC
+// Bucket version of remove.
+//
+// Remove a hash table entry from the given bucket `b`, previously acquired via
+// `sufs_libfs_bucket_write_lock()`.
 bool sufs_libfs_bucket_remove(struct sufs_libfs_chainhash *hash, struct sufs_libfs_ch_bucket *b, char *key,
     int max_size, unsigned long *val, unsigned long *val2) {
     bool ret = false;

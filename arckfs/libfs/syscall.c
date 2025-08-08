@@ -212,7 +212,8 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
         goto out;
 
 #if FIX_RENAME
-    // assert(mdold->ino_num != mdnew->ino_num);
+    // Fix: Acquire locks on renaming inodes in a consistent order to
+    //      prevent deadlocks.
     if (mdold->ino_num < mdnew->ino_num) {
         pthread_rwlock_wrlock(&mdold->sync_lock);
         pthread_rwlock_wrlock(&mdnew->sync_lock);
@@ -455,13 +456,23 @@ static struct sufs_libfs_mnode* sufs_libfs_create(struct sufs_libfs_mnode *cwd,
         /* update name_len here to finish the creation */
         dir->name_len = name_len;
 #if !FIX_FLUSH
+        // We moved `dir->ino_num = inode` here for convenience.
         dir->ino_num = inode;
 #endif
         sufs_libfs_clwb_buffer(dir, sizeof(struct sufs_dir_entry) + name_len);
         sufs_libfs_sfence();
 
 #if FIX_FLUSH
+        // Fix: update `dir->ino_num` here to finish the creation
         dir->ino_num = inode;
+
+        // A flush and memory fence are required here because ArckFS+ is a
+        // synchronous file system, making fsync() effectively a no-op.
+        //
+        // Without the fence, if this function returns and the directory is
+        // immediately fsync()'d followed by a crash, the value of `dir->ino_num`
+        // may not have been persisted. In that case, the file creation could be
+        // considered incomplete, violating fsync semantics.
         sufs_libfs_clwb_buffer(&(dir->ino_num), sizeof(dir->ino_num));
         sufs_libfs_sfence();
 #endif

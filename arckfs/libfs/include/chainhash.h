@@ -44,11 +44,7 @@ struct sufs_libfs_chainhash
         struct sufs_libfs_ch_bucket * buckets_resize_;
 
         atomic_long size;
-// #if !FIX_DRAM_PM_SYNC
-        // Fix: Once we fix DRAM/PM synchronization, there will be no concurrent writers.
-        //       Therefore, we don't need to handle concurrent resizing.
         atomic_int  seq_lock;
-// #endif
         bool dead_;
 };
 

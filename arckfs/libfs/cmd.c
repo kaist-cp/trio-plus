@@ -189,6 +189,7 @@ int sufs_libfs_cmd_chmod(int inode, unsigned int mode,
 }
 
 #if FIX_RENAME
+// Fix: Add system calls to acquire and release global rename lock
 int sufs_libfs_cmd_rename_lock(void) {
     return syscall(SYS_ioctl, dev_fd, SUFS_CMD_RENAME_LOCK, NULL);
 }

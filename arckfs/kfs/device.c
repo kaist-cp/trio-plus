@@ -86,6 +86,7 @@ static long sufs_kfs_ioctl(struct file *file, unsigned int cmd,
         case SUFS_CMD_DEBUG_INIT:
             return sufs_kfs_do_init();
 #if FIX_RENAME
+        // Fix: Handle IOCTL commands for the global rename lock.
         case SUFS_CMD_RENAME_LOCK:
             sufs_kfs_rename_lock();
             return 0;
@@ -181,6 +182,7 @@ static int sufs_init(void)
         goto out_class;
     }
 
+    // Print debug messages to indicate which FIX options are enabled.
 #if FIX_CS_COUNTER
     printk("%s: FIX_CS_COUNTER enabled\n", __func__);
 #endif
@@ -189,7 +191,11 @@ static int sufs_init(void)
 #endif
 #if FIX_RENAME
     printk("%s: FIX_RENAME enabled\n", __func__);
+    // Fix: Initialize the global rename lock when FIX_RENAME is enabled.
     sufs_kfs_rename_lock_init();
+#endif
+#if FIX_FLUSH
+    printk("%s: FIX_FLUSH enabled\n", __func__);
 #endif
 
     printk("sufs init done!\n");
