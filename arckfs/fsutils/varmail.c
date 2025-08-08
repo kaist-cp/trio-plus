@@ -13,7 +13,7 @@
 
 #define DIR_PATH "/sufs"
 #define NFILES 10000 // 2^n is better for optimize modulo operation..?
-#define NTHREADS 4
+#define MAX_THREADS 48
 #define IOBUF_SIZE (1024 * 1024)      // 1MB
 #define APPEND_SIZE (16 * 1024)       // 16KB
 
@@ -23,6 +23,9 @@
 #define PREALLOC 80
 
 #define TOTAL_WORKS 960000
+
+int nthreads = 0;
+
 // fast random
 
 static __thread uint32_t FAST_RANDOM_NEXT = 1;
@@ -85,7 +88,7 @@ void prework() {
         close(fd);
     }
 
-    printf("prework done\n");
+    // printf("prework done\n");
 }
 
 char iobuf[IOBUF_SIZE];
@@ -150,7 +153,8 @@ void rand_fill(char *buf, size_t size) {
 void* worker_thread(void* arg) {
     fast_random_set_seed(time(NULL) ^ pthread_self());
 
-    for(int i=0;i<TOTAL_WORKS / NTHREADS;i++) {
+    int epoch = TOTAL_WORKS / nthreads;
+    for(int i=0;i<epoch;i++) {
        work();
     }
 
@@ -162,9 +166,17 @@ double time_diff_sec(struct timespec start, struct timespec end) {
            (end.tv_nsec - start.tv_nsec) / 1e9;
 }
 
-int main() {
-    pthread_t threads[NTHREADS];
-    int tids[NTHREADS];
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        // printf("사용법: %s <숫자>\n", argv[0]);
+        return 1;
+    }
+
+    nthreads = atoi(argv[1]);  // 문자열을 정수로 변환
+    // printf("Number of threads: %d\n", nthreads);
+
+    pthread_t threads[MAX_THREADS];
+    int tids[MAX_THREADS];
 
     memset(iobuf, 0xDEADBEEF, IOBUF_SIZE);
     prework();
@@ -172,25 +184,26 @@ int main() {
 
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
-    for (int i = 0; i < NTHREADS; ++i) {
+    for (int i = 0; i < nthreads; ++i) {
         tids[i] = i;
         pthread_create(&threads[i], NULL, worker_thread, &tids[i]);
     }
 
-    for (int i = 0; i < NTHREADS; ++i) {
+    for (int i = 0; i < nthreads; ++i) {
         pthread_join(threads[i], NULL);
     }
 
     clock_gettime(CLOCK_MONOTONIC, &end);
 
     double duration = time_diff_sec(start, end);
-    long total_ops = TOTAL_WORKS * 13; //atomic_load(&global_opcount);
+    long total_ops = TOTAL_WORKS / nthreads * nthreads * 13;; //atomic_load(&global_opcount);
     double throughput = total_ops / duration;
 
-    printf("Finished workload simulation.\n");
-    printf("Time taken: %.3f sec\n", duration);
-    printf("Total ops: %ld\n", total_ops);
-    printf("Throughput: %.2f ops/sec\n", throughput);
+    //printf("Finished workload simulation.\n");
+    //printf("Time taken: %.3f sec\n", duration);
+    //printf("Total ops: %ld\n", total_ops);
+    //printf("Throughput: %.2f ops/sec\n", throughput);
+    printf("%.2f\n", throughput);
 
     return 0;
 }
