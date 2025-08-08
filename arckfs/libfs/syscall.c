@@ -267,7 +267,7 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
 
 #if FIX_RENAME
     // Fix: Acquire global rename lock if it is cross-directory rename
-    if(mdold->ino_num != mdnew->ino_num)
+    if(mdold->ino_num != mdnew->ino_num && mfold_type == SUFS_FILE_TYPE_DIR)
         sufs_libfs_cmd_rename_lock();
     
     // Fix: Uncomment necessary loop avoidance check
@@ -375,7 +375,7 @@ out:
     if (mdnew->ino_num != mdold->ino_num) pthread_rwlock_unlock(&mdold->sync_lock);
 #endif
 #if FIX_RENAME
-    if (mdnew->ino_num != mdold->ino_num) sufs_libfs_cmd_rename_unlock();
+    if (mdnew->ino_num != mdold->ino_num && mfold_type == SUFS_FILE_TYPE_DIR) sufs_libfs_cmd_rename_unlock();
 #endif
     sufs_libfs_file_exit_cs(mdnew);
 
@@ -456,6 +456,9 @@ static struct sufs_libfs_mnode* sufs_libfs_create(struct sufs_libfs_mnode *cwd,
         dir->name_len = name_len;
 
         sufs_libfs_clwb_buffer(dir, sizeof(struct sufs_dir_entry) + name_len);
+        sufs_libfs_sfence();
+
+        sufs_libfs_clwb_buffer(&(dir->inode), sizeof(int));
         sufs_libfs_sfence();
 
         return mf;

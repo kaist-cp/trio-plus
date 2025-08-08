@@ -35,6 +35,11 @@ struct sufs_libfs_dir_tail
     pthread_spinlock_t lock;
 };
 
+struct padded_rwlock {
+    pthread_rwlock_t lock;
+    char padding[64 - sizeof(pthread_rwlock_t)];
+};
+
 struct sufs_libfs_mnode
 {
     int ino_num;
@@ -49,6 +54,8 @@ struct sufs_libfs_mnode
 
 #if FIX_DRAM_PM_SYNC
     pthread_rwlock_t sync_lock;
+
+    // struct padded_rwlock* hash_lock; //[HASH_LOCK_SIZE] __attribute__((aligned(64)));
 #endif
 
     /*
