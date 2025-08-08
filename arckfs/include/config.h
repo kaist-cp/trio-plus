@@ -16,6 +16,10 @@
 #define FIX_RENAME 0
 #endif
 
+#ifndef FIX_FLUSH
+#define FIX_FLUSH 0
+#endif
+
 #define STRESS_REVOCATION 0
 #define STRESS_DRAM_PM_SYNC 0
 #define STRESS_HASH 0

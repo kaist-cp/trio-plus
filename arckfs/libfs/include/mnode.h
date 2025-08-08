@@ -52,7 +52,7 @@ struct sufs_libfs_mnode
     struct sufs_fidx_entry * index_start;
     struct sufs_fidx_entry * index_end;
 
-#if FIX_DRAM_PM_SYNC
+#if FIX_RENAME
     pthread_rwlock_t sync_lock;
 
     // struct padded_rwlock* hash_lock; //[HASH_LOCK_SIZE] __attribute__((aligned(64)));

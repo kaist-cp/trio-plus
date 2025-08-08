@@ -211,7 +211,7 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
     if (sufs_libfs_map_file(mdnew, 1) != 0)
         goto out;
 
-#if FIX_DRAM_PM_SYNC
+#if FIX_RENAME
     // assert(mdold->ino_num != mdnew->ino_num);
     if (mdold->ino_num < mdnew->ino_num) {
         pthread_rwlock_wrlock(&mdold->sync_lock);
@@ -370,7 +370,7 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
 
 
 out:
-#if FIX_DRAM_PM_SYNC
+#if FIX_RENAME
     pthread_rwlock_unlock(&mdnew->sync_lock);
     if (mdnew->ino_num != mdold->ino_num) pthread_rwlock_unlock(&mdold->sync_lock);
 #endif
@@ -454,14 +454,17 @@ static struct sufs_libfs_mnode* sufs_libfs_create(struct sufs_libfs_mnode *cwd,
 
         /* update name_len here to finish the creation */
         dir->name_len = name_len;
-
+#if !FIX_FLUSH
+        dir->ino_num = inode;
+#endif
         sufs_libfs_clwb_buffer(dir, sizeof(struct sufs_dir_entry) + name_len);
         sufs_libfs_sfence();
 
+#if FIX_FLUSH
         dir->ino_num = inode;
         sufs_libfs_clwb_buffer(&(dir->ino_num), sizeof(dir->ino_num));
         sufs_libfs_sfence();
-
+#endif
         return mf;
     }
 

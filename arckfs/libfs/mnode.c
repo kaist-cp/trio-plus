@@ -59,7 +59,7 @@ static struct sufs_libfs_mnode* sufs_libfs_mfs_do_mnode_init(u8 type,
 
     sufs_libfs_inode_rwlock_init(m);
 
-#if FIX_DRAM_PM_SYNC
+#if FIX_RENAME
     pthread_rwlockattr_t attr;
     pthread_rwlockattr_init(&attr);
     pthread_rwlockattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
