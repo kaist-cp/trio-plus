@@ -1,6 +1,6 @@
 CFLAGS = -O0 -g 
 
-TARGET = cat cp mkdir mv rm ls echof dummy ftruncate init touch mkdir-sufs ls-sufs bug2
+TARGET = cat cp mkdir mv rm ls echof dummy ftruncate init touch mkdir-sufs ls-sufs bug2 bug-concurrent-rename bug-create bug-open
 
 LDFLAGS = -L../libfs -l:sufs.so -Wl,-R -Wl,../libfs/ -lpthread
 

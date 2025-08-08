@@ -451,6 +451,9 @@ bool sufs_libfs_mnode_dir_insert(struct sufs_libfs_mnode *mnode, char *name,
 #endif
         goto out;
     }
+#if STRESS_REVOCATION
+    sleep(5);
+#endif
 
 #if FIX_DRAM_PM_SYNC
     // Fix: We need to perform DRAM write and PM write atomically

@@ -16,6 +16,7 @@
 #define FIX_RENAME 0
 #endif
 
+#define STRESS_REVOCATION 0
 #define STRESS_DRAM_PM_SYNC 0
 #define STRESS_HASH 0
 
@@ -64,7 +65,7 @@
 #if FIX_CS_COUNTER
 #define SUFS_MAX_INODE_NUM    16777216 / 4
 #else
-#define SUFS_MAX_INODE_NUM    16777216 / 4
+#define SUFS_MAX_INODE_NUM    16777216
 #endif
 
 #define SUFS_SUPER_PAGE_SIZE  4096
