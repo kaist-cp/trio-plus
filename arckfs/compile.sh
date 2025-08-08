@@ -17,6 +17,7 @@ for arg in "$@"; do
             echo "#define FIX_CS_COUNTER 1" >> "$OUTPUT"
             echo "#define FIX_DRAM_PM_SYNC 1" >> "$OUTPUT"
             echo "#define FIX_RENAME 1" >> "$OUTPUT"
+            echo "#define FIX_FLUSH 1" >> "$OUTPUT"
             ;;
         FIX_CS_COUNTER)
             echo "#define FIX_CS_COUNTER 1" >> "$OUTPUT"
@@ -26,6 +27,9 @@ for arg in "$@"; do
             ;;
         FIX_RENAME)
             echo "#define FIX_RENAME 1" >> "$OUTPUT"
+            ;;
+        FIX_FLUSH)
+            echo "#define FIX_FLUSH 1" >> "$OUTPUT"
             ;;
     esac
 done
