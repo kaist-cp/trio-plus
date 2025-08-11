@@ -1,8 +1,9 @@
-CFLAGS = -O0 -g 
+# CFLAGS = -O0 -g 
+CFLAGS = -O2
 
-TARGET = cat cp mkdir mv rm ls echof dummy ftruncate init touch mkdir-sufs ls-sufs 
+TARGET = cat cp mkdir mv rm ls echof dummy ftruncate init touch mkdir-sufs ls-sufs bug bug2 bug-concurrent-rename bug-create bug-open varmail fastrandom webproxy
 
-LDFLAGS = -L../libfs -l:sufs.so -Wl,-R -Wl,../libfs/
+LDFLAGS = -L../libfs -l:sufs.so -Wl,-R -Wl,../libfs/ -lpthread
 
 .PHONY: default
 default: $(TARGET)

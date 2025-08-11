@@ -35,6 +35,11 @@ struct sufs_libfs_dir_tail
     pthread_spinlock_t lock;
 };
 
+struct padded_rwlock {
+    pthread_rwlock_t lock;
+    char padding[64 - sizeof(pthread_rwlock_t)];
+};
+
 struct sufs_libfs_mnode
 {
     int ino_num;
@@ -46,6 +51,18 @@ struct sufs_libfs_mnode
 
     struct sufs_fidx_entry * index_start;
     struct sufs_fidx_entry * index_end;
+
+#if FIX_RENAME
+    // Fix: Use an inode-grained lock to ensure correct rename behavior,
+    //      following the cross-directory locking rules in Linux:
+    //      https://docs.kernel.org/filesystems/directory-locking.html
+    //
+    //      This could potentially be made more fine-grained, but the
+    //      performance impact is negligible since rename operations are rare.
+    pthread_rwlock_t sync_lock;
+
+    // struct padded_rwlock* hash_lock; //[HASH_LOCK_SIZE] __attribute__((aligned(64)));
+#endif
 
     /*
         atomic_long nlink_ __mpalign__;

@@ -211,15 +211,33 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
     if (sufs_libfs_map_file(mdnew, 1) != 0)
         goto out;
 
+#if FIX_RENAME
+    // Fix: Acquire locks on renaming inodes in a consistent order to
+    //      prevent deadlocks.
+    if (mdold->ino_num < mdnew->ino_num) {
+        pthread_rwlock_wrlock(&mdold->sync_lock);
+        pthread_rwlock_wrlock(&mdnew->sync_lock);
+    } else if (mdold->ino_num > mdnew->ino_num) {
+        pthread_rwlock_wrlock(&mdnew->sync_lock);
+        pthread_rwlock_wrlock(&mdold->sync_lock);
+    } else {
+        pthread_rwlock_wrlock(&mdnew->sync_lock);
+    }
+#endif
+
+    // DRAM read
     if (!(mfold = sufs_libfs_rename_dir_lookup(mdold, oldname)))
         goto out;
 
     mfold_type = sufs_libfs_mnode_type(mfold);
 
+    // Fix: We need to exit critical section
+    if (mdold == mdnew && oldname == newname) {
+        ret = 0;
+        goto out;
+    }
 
-    if (mdold == mdnew && oldname == newname)
-        return 0;
-
+    // DRAM read
     mfroadblock = sufs_libfs_rename_dir_lookup(mdnew, newname);
 
     if (mfroadblock)
@@ -231,8 +249,11 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
          * be renamed to non-directories. No other combinations are allowed.
          */
 
-        if (mfroadblock_type != mfold_type)
-            return -1;
+        // Fix: We need to exit critical section
+        if (mfroadblock_type != mfold_type) {
+            ret = -1;
+            goto out;
+        }
     }
 
     if (mfroadblock == mfold)
@@ -245,7 +266,12 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
         goto out;
     }
 
-#if 0
+#if FIX_RENAME
+    // Fix: Acquire global rename lock if it is cross-directory rename
+    if(mdold->ino_num != mdnew->ino_num && mfold_type == SUFS_FILE_TYPE_DIR)
+        sufs_libfs_cmd_rename_lock();
+    
+    // Fix: Uncomment necessary loop avoidance check
     if (mdold != mdnew && mfold_type == SUFS_FILE_TYPE_DIR)
     {
         /* Loop avoidance: Abort if the source is
@@ -254,18 +280,25 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
         struct sufs_libfs_mnode *md = mdnew;
         while (1)
         {
-            if (mfold == md)
-                return -1;
-            if (md->mnum_ == sufs_root_mnum)
+            // Fix: We need to exit critical section
+            if (mfold == md) {
+                ret = -1;
+                goto out;
+            }
+            // Fix: Update to new variable names
+            if (md->ino_num == SUFS_ROOT_INODE)
                 break;
-
-            md = sufs_libfs_mnode_dir_lookup(md, "..");
+            
+            // Fix: Acquiring a read lock in `sufs_libfs_mnode_dir_lookup` may cause a deadlock.
+            //  Use `sufs_libfs_rename_dir_lookup` instead, which doesn't acquire any locks.
+            //  We may still need to acquire a read lock for `md` that is neither `mdold` nor `mdnew`.
+            md = sufs_libfs_rename_dir_lookup(md, "..");
         }
     }
 #endif
 
-
     /* Perform the actual rename operation in hash table */
+    // DRAM write
     if (sufs_libfs_mnode_dir_replace_from(mdnew, newname, mfroadblock, mdold, oldname,
             mfold, mfold_type == SUFS_FILE_TYPE_DIR ? mfold : NULL, &item))
     {
@@ -275,6 +308,7 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
         int name_len = strlen(newname) + 1;
         int cpu = 0;
 
+        // PM write
         sufs_libfs_mnode_dir_entry_insert(mdnew, newname, name_len, mfold, &new_dir);
         memcpy(&(new_dir->inode), mfold->inode, sizeof(struct sufs_inode));
 
@@ -300,6 +334,7 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
         journal_tail = sufs_libfs_create_rename_transaction(cpu,
                 &(new_dir->name_len), &(old_dir->ino_num), &(rb_dir->ino_num));
 
+        // PM write
         new_dir->name_len = name_len;
         sufs_libfs_clwb_buffer(new_dir, sizeof(struct sufs_dir_entry) + name_len);
 
@@ -321,6 +356,7 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
 
         pthread_spin_unlock(&sufs_libfs_journal_locks[cpu]);
 
+        // DRAM write
         item->val2 = (unsigned long) new_dir;
 
         mfold->inode = &(new_dir->inode);
@@ -335,6 +371,13 @@ int sufs_libfs_sys_rename(struct sufs_libfs_proc *proc, char *old_path,
 
 
 out:
+#if FIX_RENAME
+    pthread_rwlock_unlock(&mdnew->sync_lock);
+    if (mdnew->ino_num != mdold->ino_num) pthread_rwlock_unlock(&mdold->sync_lock);
+#endif
+#if FIX_RENAME
+    if (mdnew->ino_num != mdold->ino_num && mfold_type == SUFS_FILE_TYPE_DIR) sufs_libfs_cmd_rename_unlock();
+#endif
     sufs_libfs_file_exit_cs(mdnew);
 
 out_err_mdold:
@@ -412,10 +455,27 @@ static struct sufs_libfs_mnode* sufs_libfs_create(struct sufs_libfs_mnode *cwd,
 
         /* update name_len here to finish the creation */
         dir->name_len = name_len;
-
+#if !FIX_FLUSH
+        // We moved `dir->ino_num = inode` here for convenience.
+        dir->ino_num = inode;
+#endif
         sufs_libfs_clwb_buffer(dir, sizeof(struct sufs_dir_entry) + name_len);
         sufs_libfs_sfence();
 
+#if FIX_FLUSH
+        // Fix: update `dir->ino_num` here to finish the creation
+        dir->ino_num = inode;
+
+        // A flush and memory fence are required here because ArckFS+ is a
+        // synchronous file system, making fsync() effectively a no-op.
+        //
+        // Without the fence, if this function returns and the directory is
+        // immediately fsync()'d followed by a crash, the value of `dir->ino_num`
+        // may not have been persisted. In that case, the file creation could be
+        // considered incomplete, violating fsync semantics.
+        sufs_libfs_clwb_buffer(&(dir->ino_num), sizeof(dir->ino_num));
+        sufs_libfs_sfence();
+#endif
         return mf;
     }
 

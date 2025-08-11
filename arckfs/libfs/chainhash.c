@@ -67,7 +67,14 @@ static inline void sufs_libfs_ch_item_free(struct sufs_libfs_ch_item *item)
 static inline void
 sufs_libfs_chainhash_bucket_init(struct sufs_libfs_ch_bucket * bucket)
 {
+#if FIX_DRAM_PM_SYNC
+    pthread_rwlockattr_t attr;
+    pthread_rwlockattr_init(&attr);
+    pthread_rwlockattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_rwlock_init(&(bucket->lock), &attr);
+#else
     pthread_spin_init(&(bucket->lock), PTHREAD_PROCESS_SHARED);
+#endif
 
     bucket->head = NULL;
     bucket->dead_ = false;
@@ -126,7 +133,7 @@ sufs_libfs_chainhash_find_resize_buckets(struct sufs_libfs_chainhash *hash,
     return b;
 }
 
-static struct sufs_libfs_ch_bucket *
+struct sufs_libfs_ch_bucket *
 sufs_libfs_get_buckets(struct sufs_libfs_chainhash * hash, char * key, int max_size)
 {
     int bseq = 0, eseq = 0;
@@ -156,20 +163,20 @@ bool sufs_libfs_chainhash_lookup(struct sufs_libfs_chainhash *hash, char *key,
 
     b = sufs_libfs_get_buckets(hash, key, max_size);
 
-#if 0
-    pthread_spin_lock(&b->lock);
+#if FIX_DRAM_PM_SYNC
+    bucket_rdlock(b);
 #endif
 
     if (b->dead_)
     {
-#if 0
-        pthread_spin_unlock(&b->lock);
+#if FIX_DRAM_PM_SYNC
+        bucket_unlock(b);
 #endif
 
         b = sufs_libfs_chainhash_find_resize_buckets(hash, key, max_size);
 
-#if 0
-        pthread_spin_lock(&b->lock);
+#if FIX_DRAM_PM_SYNC
+        bucket_rdlock(b);
 #endif
     }
 
@@ -191,8 +198,8 @@ bool sufs_libfs_chainhash_lookup(struct sufs_libfs_chainhash *hash, char *key,
     ret = false;
 
 out:
-#if 0
-    pthread_spin_unlock(&b->lock);
+#if FIX_DRAM_PM_SYNC
+    bucket_unlock(b);
 #endif
     return ret;
 }
@@ -275,7 +282,8 @@ static void sufs_libfs_chainhash_resize(struct sufs_libfs_chainhash * hash,
 
         b = &(hash->buckets_[i]);
 
-        pthread_spin_lock(&(b->lock));
+        // pthread_spin_lock(&(b->lock));
+        bucket_wrlock(b);
 
         b->dead_ = true;
 
@@ -299,17 +307,20 @@ static void sufs_libfs_chainhash_resize(struct sufs_libfs_chainhash * hash,
             }
 #endif
 
-            pthread_spin_lock(&(nb->lock));
+            // pthread_spin_lock(&(nb->lock));
+            bucket_wrlock(nb);
 
             prev->next = nb->head;
             nb->head = prev;
 
-            pthread_spin_unlock(&(nb->lock));
+            // pthread_spin_unlock(&(nb->lock));
+            bucket_unlock(nb);
         }
 
         hash->buckets_[i].head = NULL;
 
-        pthread_spin_unlock(&(b->lock));
+        // pthread_spin_unlock(&(b->lock));
+        bucket_unlock(b);
     }
 
     /* swap back */
@@ -335,6 +346,116 @@ static void sufs_libfs_chainhash_resize(struct sufs_libfs_chainhash * hash,
     return;
 }
 
+#if FIX_DRAM_PM_SYNC
+/*
+ * Given a hash table and a key, locate the corresponding bucket,
+ * acquire its write lock, and return it.
+ *
+ * The returned bucket pointer `b` acts as a descriptor: mutual exclusion
+ * on that bucket is guaranteed until `sufs_libfs_bucket_unlock(hash, b, ...)` is called.
+ * 
+ * This function preserves the original behavior of chainhash functions.
+ */
+struct sufs_libfs_ch_bucket* sufs_libfs_bucket_write_lock(struct sufs_libfs_chainhash *hash,
+    char *key, int max_size)
+{
+    struct sufs_libfs_ch_bucket *b = NULL;
+
+    b = sufs_libfs_get_buckets(hash, key, max_size);
+
+    // pthread_spin_lock(&b->lock);
+    bucket_wrlock(b);
+
+    if (b->dead_)
+    {
+        // pthread_spin_unlock(&b->lock);
+        bucket_unlock(b);
+
+        b = sufs_libfs_chainhash_find_resize_buckets(hash, key, max_size);
+
+        // pthread_spin_lock(&b->lock);
+        bucket_wrlock(b);
+    }
+    return b;
+}
+
+/*
+ * Release the lock on the given bucket `b`, previously acquired via
+ * `sufs_libfs_bucket_write_lock()`.
+ *
+ * If `resize` is true, check the load factor and, if necessary,
+ * resize the hash table after unlocking.
+ * 
+ * This function preserves the original behavior of chainhash functions.
+ */
+void sufs_libfs_bucket_unlock(struct sufs_libfs_chainhash *hash, struct sufs_libfs_ch_bucket* b, int max_size, bool resize)
+{
+    //pthread_spin_unlock(&b->lock);
+    bucket_unlock(b);
+
+    if (resize && hash->nbuckets_ != sufs_libfs_hash_max_size &&
+            hash->size > hash->nbuckets_ * SUFS_LIBFS_DIR_REHASH_FACTOR)
+    {
+        sufs_libfs_chainhash_resize(hash, 1, max_size);
+    }
+}
+
+// Bucket version of insert.
+//
+// Insert a hash table entry into the given bucket `b`, previously acquired via
+// `sufs_libfs_bucket_write_lock()`.
+bool sufs_libfs_bucket_insert(struct sufs_libfs_chainhash *hash, struct sufs_libfs_ch_bucket* b, char *key,
+    int max_size, unsigned long val, unsigned long val2,
+    struct sufs_libfs_ch_item ** item) 
+{
+    bool ret = false;
+    struct sufs_libfs_ch_item *i = NULL;
+
+    for (i = b->head; i != NULL; i = i->next)
+    {
+        if (strcmp(i->key, key) == 0)
+        {
+#if 0
+            printf("i->key is %s, key is %s!\n", i->key, key);
+            fflush(stdout);
+#endif
+
+            ret = false;
+            goto out;
+        }
+    }
+
+    i = malloc(sizeof(struct sufs_libfs_ch_item));
+
+#if 0
+    if (strcmp(key, "001juxaacivvy") == 0)
+    {
+        printf("index is %ld\n", sufs_libfs_hash_string(key, max_size) % hash->nbuckets_);
+    }
+#endif
+
+#if 0
+    printf("insert: key=%s, val=%ld, val2=%ld\n", key, val, val2);
+#endif
+
+    sufs_libfs_ch_item_init(i, key, max_size, val, val2);
+
+
+    i->next = b->head;
+    b->head = i;
+
+    ret = true;
+
+    if (item)
+        *item = i;
+
+    hash->size++;
+
+out:
+    return ret;
+}
+#endif
+
 bool sufs_libfs_chainhash_insert(struct sufs_libfs_chainhash *hash, char *key,
         int max_size, unsigned long val, unsigned long val2,
         struct sufs_libfs_ch_item ** item)
@@ -354,7 +475,8 @@ bool sufs_libfs_chainhash_insert(struct sufs_libfs_chainhash *hash, char *key,
 
     b = sufs_libfs_get_buckets(hash, key, max_size);
 
-    pthread_spin_lock(&b->lock);
+    // pthread_spin_lock(&b->lock);
+    bucket_wrlock(b);
 
     if (hash->dead_)
     {
@@ -369,11 +491,13 @@ bool sufs_libfs_chainhash_insert(struct sufs_libfs_chainhash *hash, char *key,
 
     if (b->dead_)
     {
-        pthread_spin_unlock(&b->lock);
+        // pthread_spin_unlock(&b->lock);
+        bucket_unlock(b);
 
         b = sufs_libfs_chainhash_find_resize_buckets(hash, key, max_size);
 
-        pthread_spin_lock(&b->lock);
+        // pthread_spin_lock(&b->lock);
+        bucket_wrlock(b);
     }
 
 
@@ -418,7 +542,8 @@ bool sufs_libfs_chainhash_insert(struct sufs_libfs_chainhash *hash, char *key,
     hash->size++;
 
 out:
-    pthread_spin_unlock(&b->lock);
+    // pthread_spin_unlock(&b->lock);
+    bucket_unlock(b);
 
     /* TODO: Make the test a function.. */
     if (ret && hash->nbuckets_ != sufs_libfs_hash_max_size &&
@@ -435,6 +560,58 @@ out:
     return ret;
 }
 
+#if FIX_DRAM_PM_SYNC
+// Bucket version of remove.
+//
+// Remove a hash table entry from the given bucket `b`, previously acquired via
+// `sufs_libfs_bucket_write_lock()`.
+bool sufs_libfs_bucket_remove(struct sufs_libfs_chainhash *hash, struct sufs_libfs_ch_bucket *b, char *key,
+    int max_size, unsigned long *val, unsigned long *val2) {
+    bool ret = false;
+
+    struct sufs_libfs_ch_item *i = NULL, *prev = i;
+
+    for (i = b->head; i != NULL; i = i->next)
+    {
+        if (strcmp(i->key, key) == 0)
+        {
+            if (prev == NULL)
+            {
+                b->head = i->next;
+            }
+            else
+            {
+                prev->next = i->next;
+            }
+
+            ret = true;
+            hash->size--;
+            goto out;
+        }
+
+        prev = i;
+    }
+
+out:
+    if (ret)
+    {
+        if (val)
+        {
+            (*val) = i->val;
+        }
+
+        if (val2)
+        {
+            (*val2) = i->val2;
+        }
+
+        sufs_libfs_ch_item_free(i);
+    }
+
+    return ret;
+}
+#endif
+
 bool sufs_libfs_chainhash_remove(struct sufs_libfs_chainhash *hash, char *key,
         int max_size, unsigned long *val, unsigned long *val2)
 {
@@ -445,15 +622,18 @@ bool sufs_libfs_chainhash_remove(struct sufs_libfs_chainhash *hash, char *key,
 
     b = sufs_libfs_get_buckets(hash, key, max_size);
 
-    pthread_spin_lock(&b->lock);
+    // pthread_spin_lock(&b->lock);
+    bucket_wrlock(b);
 
     if (b->dead_)
     {
-        pthread_spin_unlock(&b->lock);
+        // pthread_spin_unlock(&b->lock);
+        bucket_unlock(b);
 
         b = sufs_libfs_chainhash_find_resize_buckets(hash, key, max_size);
 
-        pthread_spin_lock(&b->lock);
+        // pthread_spin_lock(&b->lock);
+        bucket_wrlock(b);
     }
 
 
@@ -479,7 +659,8 @@ bool sufs_libfs_chainhash_remove(struct sufs_libfs_chainhash *hash, char *key,
     }
 
 out:
-    pthread_spin_unlock(&b->lock);
+    // pthread_spin_unlock(&b->lock);
+    bucket_unlock(b);
 
     if (ret)
     {
@@ -578,12 +759,14 @@ lock:
     }
 
     for (i = 0; i < index; i++)
-        pthread_spin_lock(&buckets[i]->lock);
+        // pthread_spin_lock(&buckets[i]->lock);
+        bucket_wrlock(buckets[i]);
 
     if (bsrc->dead_)
     {
         for (i = 0; i < index; i++)
-            pthread_spin_unlock(&buckets[i]->lock);
+            // pthread_spin_unlock(&buckets[i]->lock);
+            bucket_unlock(buckets[i]);
 
         bsrc = sufs_libfs_chainhash_find_resize_buckets(src, ksrc, max_size);
         goto lock;
@@ -592,7 +775,8 @@ lock:
     if (bdst->dead_)
     {
         for (i = 0; i < index; i++)
-            pthread_spin_unlock(&buckets[i]->lock);
+            // pthread_spin_unlock(&buckets[i]->lock);
+            bucket_unlock(buckets[i]);
 
         bdst = sufs_libfs_chainhash_find_resize_buckets(dst, kdst, max_size);
         goto lock;
@@ -696,8 +880,8 @@ lock:
 
 out:
     for (i = 0; i < index; i++)
-        pthread_spin_unlock(&buckets[i]->lock);
-
+        // pthread_spin_unlock(&buckets[i]->lock);
+        bucket_unlock(buckets[i]);
     if (free_src)
         sufs_libfs_ch_item_free(srci);
 
@@ -738,7 +922,8 @@ void sufs_libfs_chainhash_forced_remove_and_kill(
     int i = 0;
 
     for (i = 0; i < hash->nbuckets_; i++)
-        pthread_spin_lock(&hash->buckets_[i].lock);
+        // pthread_spin_lock(&hash->buckets_[i].lock);
+        bucket_wrlock(&hash->buckets_[i]);
 
     for (i = 0; i < hash->nbuckets_; i++)
     {
@@ -758,7 +943,8 @@ void sufs_libfs_chainhash_forced_remove_and_kill(
     hash->dead_ = true;
 
     for (i = 0; i < hash->nbuckets_; i++)
-        pthread_spin_unlock(&hash->buckets_[i].lock);
+        // pthread_spin_unlock(&hash->buckets_[i].lock);
+        bucket_unlock(&hash->buckets_[i]);
 }
 
 /*
@@ -788,8 +974,9 @@ bool sufs_libfs_chainhash_enumerate(struct sufs_libfs_chainhash *hash,
         struct sufs_libfs_ch_item *item;
         bool found = false;
 
-#if 0
-        pthread_spin_lock(&hash->buckets_[i].lock);
+#if FIX_DRAM_PM_SYNC
+        // pthread_spin_lock(&hash->buckets_[i].lock);
+        bucket_rdlock(&hash->buckets_[i]);
 #endif
 
         for (item = b->head; item != NULL; item = item->next)
@@ -812,8 +999,9 @@ bool sufs_libfs_chainhash_enumerate(struct sufs_libfs_chainhash *hash,
             }
         }
 
-#if 0
-        pthread_spin_unlock(&hash->buckets_[i].lock);
+#if FIX_DRAM_PM_SYNC
+        // pthread_spin_unlock(&hash->buckets_[i].lock);
+        bucket_unlock(&hash->buckets_[i]);
 #endif
 
         if (found)
@@ -856,8 +1044,9 @@ __ssize_t sufs_libfs_chainhash_getdents(struct sufs_libfs_chainhash *hash,
         struct sufs_libfs_ch_bucket *b = &hash->buckets_[i];
         struct sufs_libfs_ch_item *item = NULL;
 
-#if 0
-        pthread_spin_lock(&hash->buckets_[i].lock);
+#if FIX_DRAM_PM_SYNC
+        // pthread_spin_lock(&hash->buckets_[i].lock);
+        bucket_rdlock(&hash->buckets_[i]);
 #endif
 
         for (item = b->head; item != NULL; item = item->next)
@@ -875,8 +1064,9 @@ __ssize_t sufs_libfs_chainhash_getdents(struct sufs_libfs_chainhash *hash,
 
                 if (iter_offset + dent_size > length)
                 {
-#if 0
-                    pthread_spin_unlock(&hash->buckets_[i].lock);
+#if FIX_DRAM_PM_SYNC
+                    // pthread_spin_unlock(&hash->buckets_[i].lock);
+                    bucket_unlock(&hash->buckets_[i]);
 #endif
                     goto out;
                 }
@@ -898,8 +1088,9 @@ __ssize_t sufs_libfs_chainhash_getdents(struct sufs_libfs_chainhash *hash,
             count++;
         }
 
-#if 0
-        pthread_spin_unlock(&hash->buckets_[i].lock);
+#if FIX_DRAM_PM_SYNC
+        // pthread_spin_unlock(&hash->buckets_[i].lock);
+        bucket_unlock(&hash->buckets_[i]);
 #endif
 
         j = 0;

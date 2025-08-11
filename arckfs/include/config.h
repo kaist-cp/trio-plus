@@ -1,6 +1,44 @@
 #ifndef SUFS_GLOBAL_CONFIG_H_
 #define SUFS_GLOBAL_CONFIG_H_
 
+/*
+ * Flags for enabling ArckFS+ patches.
+ *
+ * These macros are controlled via the auto-generated "fix_config.h",
+ * which is created by running compile.sh.
+ *
+ * To enable all FIXes, run:
+ *     ./compile.sh FIX_ALL
+ * from the /arckfs directory.
+ * 
+ * To enable a specific FIX:
+ *     ./compile.sh FIX_CS_COUNTER
+ *     ./compile.sh FIX_DRAM_PM_SYNC
+ *     (and so on for other FIX_* macros)
+ */
+#include "fix_config.h"
+
+#ifndef FIX_CS_COUNTER
+#define FIX_CS_COUNTER 0
+#endif
+
+#ifndef FIX_DRAM_PM_SYNC
+#define FIX_DRAM_PM_SYNC 0
+#endif
+
+#ifndef FIX_RENAME
+#define FIX_RENAME 0
+#endif
+
+#ifndef FIX_FLUSH
+#define FIX_FLUSH 0
+#endif
+
+// Flags to reproduce the bug; work in progress...
+#define STRESS_REVOCATION 0
+#define STRESS_DRAM_PM_SYNC 0
+#define STRESS_HASH 0
+
 /* cache line size */
 #define SUFS_CACHELINE 64
 
@@ -43,7 +81,23 @@
 #define SUFS_FIRST_UFS_INODE_NUM (3)
 
 /* Maximal number of inode */
+#if FIX_CS_COUNTER
+/*
+ * Reduce the maximum inode count when FIX_CS_COUNTER is enabled, due to
+ * kernel allocator limitations.
+ *
+ * ArckFS allocates space for the lease ring using alloc_pages_node(),
+ * which relies on the kernel’s buddy allocator. In the artifact, the buddy
+ * allocator was configured with a maximum allocation size of 4 MB.
+ *
+ * Replacing the lease ring’s bitmap with per-inode counters increased
+ * memory usage, causing alloc_pages_node() to exceed this limit. To avoid
+ * allocation failures, the inode count is reduced accordingly.
+ */
+#define SUFS_MAX_INODE_NUM    16777216 / 4
+#else
 #define SUFS_MAX_INODE_NUM    16777216
+#endif
 
 #define SUFS_SUPER_PAGE_SIZE  4096
 
@@ -56,7 +110,13 @@
 /* Lease ring: whether an inode is in critical section or not */
 #define SUFS_LEASE_RING_ADDR (SUFS_RING_ADDR)
 
-#define SUFS_LEASE_RING_SIZE (SUFS_MAX_INODE_NUM / 8)
+#if FIX_CS_COUNTER
+    #define CS_COUNTER_SENTINEL -1
+    // Fix: Allocate 1-byte counter for each inode
+    #define SUFS_LEASE_RING_SIZE (SUFS_MAX_INODE_NUM * 1)
+#else
+    #define SUFS_LEASE_RING_SIZE (SUFS_MAX_INODE_NUM / 8)
+#endif
 
 /* Mapped ring: whether an inode is still being mapped or not */
 #define SUFS_MAPPED_RING_ADDR (SUFS_RING_ADDR + SUFS_LEASE_RING_SIZE)

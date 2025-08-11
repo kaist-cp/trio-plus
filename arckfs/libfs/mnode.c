@@ -14,6 +14,7 @@
 #include "util.h"
 #include "journal.h"
 #include "random.h"
+#include "hash.h"
 
 struct sufs_libfs_mnode **sufs_libfs_mnode_array = NULL;
 
@@ -58,6 +59,20 @@ static struct sufs_libfs_mnode* sufs_libfs_mfs_do_mnode_init(u8 type,
 
     sufs_libfs_inode_rwlock_init(m);
 
+#if FIX_RENAME
+    pthread_rwlockattr_t attr;
+    pthread_rwlockattr_init(&attr);
+    pthread_rwlockattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_rwlock_init(&m->sync_lock, &attr);
+    
+    /*if(type == SUFS_FILE_TYPE_DIR) {
+        m->hash_lock = aligned_alloc(64, sizeof(struct padded_rwlock) * HASH_LOCK_SIZE);
+        for(int i=0;i<HASH_LOCK_SIZE;i++) pthread_rwlock_init(&m->hash_lock[i].lock, &attr);
+    }*/
+    
+
+#endif
+
     switch (type)
     {
         case SUFS_FILE_TYPE_REG:
@@ -75,6 +90,7 @@ static struct sufs_libfs_mnode* sufs_libfs_mfs_do_mnode_init(u8 type,
 
     return m;
 }
+
 
 static void sufs_libfs_mnode_file_unmap(struct sufs_libfs_mnode *m);
 
@@ -162,8 +178,9 @@ sufs_libfs_mnode_dir_build_index_one_file_block(struct sufs_libfs_mnode * mnode,
 
             if (sufs_libfs_chainhash_insert(&mnode->data.dir_data.map_,
                     dir->name, SUFS_NAME_MAX, dir->ino_num,
-                    (unsigned long) dir, NULL) == false)
-                return -ENOMEM;
+                    (unsigned long) dir, NULL) == false) {
+                    return -ENOMEM;
+                }
         }
 
         dir = (struct sufs_dir_entry *)
@@ -244,8 +261,10 @@ sufs_libfs_mnode_dir_lookup(struct sufs_libfs_mnode *mnode, char *name)
         goto out;
     }
 
+    // DRAM read, `sufs_libfs_chainhash_lookup` is thread safe
     sufs_libfs_chainhash_lookup(&mnode->data.dir_data.map_, name, SUFS_NAME_MAX,
             &ino, NULL);
+
 
 #if 0
         printf("name is %s, ino is %ld!\n", name, ino);
@@ -280,8 +299,10 @@ bool sufs_libfs_mnode_dir_enumerate(struct sufs_libfs_mnode *mnode, char *prev,
     if (sufs_libfs_map_file(mnode, 0) != 0)
         goto out;
 
+    // DRAM read; `sufs_libfs_chainhash_enumerate` is thread safe.
     ret = sufs_libfs_chainhash_enumerate(&mnode->data.dir_data.map_,
             SUFS_NAME_MAX, prev, name);
+
 
 out:
     sufs_libfs_file_exit_cs(mnode);
@@ -298,8 +319,10 @@ __ssize_t sufs_libfs_mnode_dir_getdents(struct sufs_libfs_mnode *mnode,
     if (sufs_libfs_map_file(mnode, 0) != 0)
         goto out;
 
+    // DRAM read; `sufs_libfs_chainhash_getdents` is thread safe.
     ret = sufs_libfs_chainhash_getdents(&mnode->data.dir_data.map_,
             SUFS_NAME_MAX, offset_ptr, buffer, length);
+
 
 out:
     sufs_libfs_file_exit_cs(mnode);
@@ -378,7 +401,8 @@ bool sufs_libfs_mnode_dir_entry_insert(struct sufs_libfs_mnode *mnode,
 #endif
 
     strcpy(dir->name, name);
-    dir->ino_num = mf->ino_num;
+    // Fix: Initially set `dir->ino_num` to 0 so it can serve as a commit point.
+    dir->ino_num = 0;
     dir->rec_len = record_len;
 
 #if 0
@@ -417,10 +441,23 @@ bool sufs_libfs_mnode_dir_insert(struct sufs_libfs_mnode *mnode, char *name,
 #endif
         goto out;
     }
+#if STRESS_REVOCATION
+    sleep(5);
+#endif
 
+#if FIX_DRAM_PM_SYNC
+    // Fix: We need to perform DRAM write and PM write atomically
+    bool resize = false;
+    struct sufs_libfs_ch_bucket *b = sufs_libfs_bucket_write_lock(&mnode->data.dir_data.map_, name, SUFS_NAME_MAX);
+
+    // DRAM write
+    if (!(resize = sufs_libfs_bucket_insert(&mnode->data.dir_data.map_, b, name,
+        SUFS_NAME_MAX, mf->ino_num, 0, &item)))
+#else
     if (!sufs_libfs_chainhash_insert(&mnode->data.dir_data.map_, name,
-            SUFS_NAME_MAX, mf->ino_num, 0, &item))
-    {
+        SUFS_NAME_MAX, mf->ino_num, 0, &item))
+#endif
+    {    
 #if 0
         printf("hash insert failed!\n");
         fflush(stdout);
@@ -428,16 +465,30 @@ bool sufs_libfs_mnode_dir_insert(struct sufs_libfs_mnode *mnode, char *name,
         goto out;
     }
 
+#if STRESS_DRAM_PM_SYNC
+    sleep(5);
+#endif
+
+    // PM write
     if (!sufs_libfs_mnode_dir_entry_insert(mnode, name, name_len, mf, &dir))
     {
 #if 0
         printf("dir insert failed!\n");
         fflush(stdout);
 #endif
+#if FIX_DRAM_PM_SYNC
+        // If we return prematurely, bucket should be unlocked.
+        sufs_libfs_bucket_unlock(&mnode->data.dir_data.map_, b, SUFS_NAME_MAX, resize);
+#endif
         goto out;
     }
 
+    // DRAM write
     item->val2 = (unsigned long) dir;
+
+#if FIX_DRAM_PM_SYNC
+    sufs_libfs_bucket_unlock(&mnode->data.dir_data.map_, b, SUFS_NAME_MAX, resize);
+#endif
     ret = true;
 
 #if 0
@@ -467,16 +518,34 @@ bool sufs_libfs_mnode_dir_remove(struct sufs_libfs_mnode *mnode, char *name)
     if (sufs_libfs_map_file(mnode, 1) != 0)
         goto out;
 
+#if FIX_DRAM_PM_SYNC
+    // Fix: We need to perform DRAM write and PM write atomically
+    bool resize = false;
+    struct sufs_libfs_ch_bucket *b = sufs_libfs_bucket_write_lock(&mnode->data.dir_data.map_, name, SUFS_NAME_MAX);
+    // DRAM write
+    if (!(resize = sufs_libfs_bucket_remove(&mnode->data.dir_data.map_, b, name,
+        SUFS_NAME_MAX, NULL, (unsigned long*) &dir)))
+#else
     if (!sufs_libfs_chainhash_remove(&mnode->data.dir_data.map_, name,
-            SUFS_NAME_MAX, NULL, (unsigned long*) &dir))
+        SUFS_NAME_MAX, NULL, (unsigned long*) &dir))
+#endif
     {
+#if FIX_DRAM_PM_SYNC
+        // If we return prematurely, bucket should be unlocked.
+        sufs_libfs_bucket_unlock(&mnode->data.dir_data.map_, b, SUFS_NAME_MAX, resize);
+#endif
         goto out;
     }
 
+    // PM write
     dir->ino_num = SUFS_INODE_TOMBSTONE;
 
     sufs_libfs_clwb_buffer(&(dir->ino_num), sizeof(dir->ino_num));
     sufs_libfs_sfence();
+   
+#if FIX_DRAM_PM_SYNC
+    sufs_libfs_bucket_unlock(&mnode->data.dir_data.map_, b, SUFS_NAME_MAX, resize);    
+#endif
 
     ret = true;
 
@@ -493,6 +562,8 @@ bool sufs_libfs_mnode_dir_kill(struct sufs_libfs_mnode *mnode)
     if (sufs_libfs_map_file(mnode, 0) != 0)
         goto out;
 
+    // Fix: Maybe we need to acquire write lock of mnode->sync_lock
+    // DRAM write
     ret = sufs_libfs_chainhash_remove_and_kill(&mnode->data.dir_data.map_);
 out:
     sufs_libfs_file_exit_cs(mnode);
@@ -520,8 +591,11 @@ sufs_libfs_mnode_dir_exists(struct sufs_libfs_mnode *mnode, char *name)
         goto out;
     }
 
+    // DRAM read; `sufs_libfs_chainhash_lookup` is thread safe.
     sufs_libfs_chainhash_lookup(&mnode->data.dir_data.map_, name, SUFS_NAME_MAX,
             &ret, NULL);
+
+
 out:
     sufs_libfs_file_exit_cs(mnode);
     return sufs_libfs_mnode_array[ret];

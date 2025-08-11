@@ -10,6 +10,10 @@
 #include "super.h"
 #include "inode.h"
 
+#if FIX_CS_COUNTER
+#include <stdatomic.h>
+#endif
+
 /*
  * Just need something simple here to make the prototype work, the release is
  * not the interesting part of the paper and it is unlikely to become the
@@ -49,8 +53,37 @@ static inline int sufs_kfs_is_lease_expired(int ino, struct sufs_kfs_lease *l,
 
     lease_ring_addr = sufs_tgroup[l->owner[index]].lease_ring_kaddr;
 
+#if FIX_CS_COUNTER
+    // Fix: Ensure there are no threads currently in the critical section.
+    //      If the kernel observes that the counter is zero, it may begin revoking the lease from the owner.
+    //      We must prevent new threads from entering cs by atomically setting the sentinel value.
+    //      
+    //      Note: The sentinel value is not an enforcement mechanism;
+    //      it is merely a notification to LibFS.
+    //      If a malicious or buggy LibFS violates the rule and modifies a sentinel-valued counter,
+    //      it may trigger unexpected unmapping and expose itself to potential segmentation faults.
+    //      This is a consequence entirely on the LibFS side and does not pose any security issue.
+    atomic_char* addr = ((atomic_char*) lease_ring_addr) + ino;
+    unsigned char count = 0;
+    return atomic_compare_exchange_strong(addr, &count, CS_COUNTER_SENTINEL);
+#else
+    /*
+    * Original design:
+    * To check lease expiration, the kernel reads information from the lease
+    * ring, which is maintained by LibFS. This design inherently requires even
+    * potentially malicious LibFS instances to cooperate — e.g., setting the
+    * bit to 0 when the LibFS finishes using the inode.
+    *
+    * Our patch preserves this original design philosophy:
+    *   (1) Usage information is still managed in real time by LibFS via the
+    *       lease ring.
+    *   (2) The kernel controller checks for expiration based on the usage
+    *       data indicated by LibFS.
+    *   (3) Since LibFS cannot be fully trusted, we rely on
+    *       mechanisms such as timeouts.
+    */
     return !(test_bit(ino, lease_ring_addr));
-
+#endif
 }
 
 /* Invoke when the lock is acquired
@@ -204,6 +237,16 @@ int sufs_kfs_acquire_write_lease(int ino, struct sufs_kfs_lease *l, int tgid)
 
         sufs_kfs_clean_map_ring(ino, l);
 
+#if FIX_CS_COUNTER
+        // Fix: We unmapped inodes from previous owners here, we can release sentinel values now. 
+        for (int i = 0; i < l->owner_cnt; i++)
+        {
+            atomic_uchar* addr = ((atomic_uchar*)sufs_tgroup[l->owner[i]].lease_ring_kaddr) + ino;
+            if (atomic_load(addr) == CS_COUNTER_SENTINEL)
+                atomic_store(addr, 0);
+        }
+#endif
+
         l->state = SUFS_KFS_WRITE_OWNED;
         l->owner_cnt = 1;
         l->owner[0] = tgid;
@@ -212,6 +255,19 @@ int sufs_kfs_acquire_write_lease(int ino, struct sufs_kfs_lease *l, int tgid)
         ret = 0;
     }
 
+#if FIX_CS_COUNTER
+    else
+    {
+        // Fix: If we are not going to acquire this lease,
+        //      previous owners are free to enter critical sections.
+        for (int i = 0; i < l->owner_cnt; i++)
+        {
+            atomic_char* addr = ((atomic_char*)sufs_tgroup[l->owner[i]].lease_ring_kaddr) + ino;
+            if (atomic_load(addr) == CS_COUNTER_SENTINEL)
+                atomic_store(addr, 0);
+        }
+    }
+#endif
     spin_unlock_irqrestore(&(l->lock), flags);
 
     return ret;
@@ -320,6 +376,18 @@ int sufs_kfs_acquire_read_lease(int ino, struct sufs_kfs_lease *l, int tgid)
         }
         else
         {
+#if FIX_CS_COUNTER
+            // Fix: we need to unmap this inode from previous owners.
+            sufs_kfs_clean_map_ring(ino, l);
+
+            // Fix: We unmapped inodes from previous owners here, we can release sentinel values now. 
+            for (int i = 0; i < l->owner_cnt; i++)
+            {
+                atomic_uchar* addr = ((atomic_uchar*)sufs_tgroup[l->owner[i]].lease_ring_kaddr) + ino;
+                if (atomic_load(addr) == CS_COUNTER_SENTINEL)
+                    atomic_store(addr, 0);
+            }
+#endif
             l->state = SUFS_KFS_READ_OWNED;
             l->owner_cnt = 1;
             l->owner[0] = tgid;
@@ -328,6 +396,19 @@ int sufs_kfs_acquire_read_lease(int ino, struct sufs_kfs_lease *l, int tgid)
 
         ret = 0;
     }
+#if FIX_CS_COUNTER
+    else
+    {
+        // Fix: If we are not going to acquire this lease,
+        //      previous owners are free to enter critical sections.
+        for (int i = 0; i < l->owner_cnt; i++)
+        {
+            atomic_char* addr = ((atomic_char*)sufs_tgroup[l->owner[i]].lease_ring_kaddr) + ino;
+            if (atomic_load(addr) == CS_COUNTER_SENTINEL)
+                atomic_store(addr, 0);
+        }
+    }
+#endif
 
     spin_unlock_irqrestore(&(l->lock), flags);
 
